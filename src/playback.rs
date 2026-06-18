@@ -102,8 +102,12 @@ impl Playback {
     }
 
     fn set_wpm(&mut self, wpm: u16) {
+        let current_duration = self.current().map(|word| word.duration);
         self.wpm = wpm.clamp(MIN_WPM, MAX_WPM);
         self.rebuild_words();
+        if let (Some(word), Some(duration)) = (self.words.get_mut(self.index), current_duration) {
+            word.duration = duration;
+        }
     }
 
     fn rebuild_words(&mut self) {
@@ -237,6 +241,21 @@ mod tests {
         assert_eq!(playback.orp_mode(), OrpMode::Center);
         playback.restart();
         assert_eq!(playback.index(), 0);
+    }
+
+    #[test]
+    fn wpm_changes_apply_after_current_token() {
+        let mut playback = Playback::new(tokens(), DEFAULT_WPM, OrpMode::Spritz).unwrap();
+        let original_duration = playback.current().unwrap().duration;
+
+        playback.increase_wpm();
+
+        assert_eq!(playback.current().unwrap().duration, original_duration);
+        playback.next();
+        assert_eq!(
+            playback.current().unwrap().duration,
+            duration_for_wpm(DEFAULT_WPM + WPM_STEP)
+        );
     }
 
     #[test]

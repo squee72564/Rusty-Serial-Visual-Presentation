@@ -68,13 +68,28 @@ impl ReaderApp {
                 if let Event::Key(key) = event::read()? {
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char(' ') => self.playback.toggle_playing(),
-                        KeyCode::Left => self.playback.previous(),
-                        KeyCode::Right => self.playback.next(),
+                        KeyCode::Char(' ') => {
+                            let was_playing = self.playback.is_playing();
+                            self.playback.toggle_playing();
+                            if !was_playing && self.playback.is_playing() {
+                                self.last_tick = Instant::now();
+                            }
+                        }
+                        KeyCode::Left => {
+                            self.playback.previous();
+                            self.last_tick = Instant::now();
+                        }
+                        KeyCode::Right => {
+                            self.playback.next();
+                            self.last_tick = Instant::now();
+                        }
                         KeyCode::Up => self.playback.increase_wpm(),
                         KeyCode::Down => self.playback.decrease_wpm(),
                         KeyCode::Char('o') => self.playback.cycle_orp_mode(),
-                        KeyCode::Char('r') => self.playback.restart(),
+                        KeyCode::Char('r') => {
+                            self.playback.restart();
+                            self.last_tick = Instant::now();
+                        }
                         _ => {}
                     }
                 }
