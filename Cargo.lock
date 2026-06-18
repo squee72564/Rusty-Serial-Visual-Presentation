@@ -562,20 +562,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "orp-reader"
-version = "0.1.0"
-dependencies = [
- "clap",
- "crossterm",
- "pdf-extract",
- "pulldown-cmark",
- "ratatui",
- "thiserror",
- "unicode-segmentation",
- "unicode-width 0.2.0",
-]
-
-[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -709,6 +695,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "rsvp"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "pdf-extract",
+ "pulldown-cmark",
+ "ratatui",
+ "thiserror",
+ "unicode-segmentation",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

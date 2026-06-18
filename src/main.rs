@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use orp_reader::error::OrpError;
-use orp_reader::input::extract_path;
-use orp_reader::normalize::normalize;
-use orp_reader::playback::{DEFAULT_WPM, Playback, validate_wpm};
-use orp_reader::rsvp::OrpMode;
-use orp_reader::tokenize::tokenize;
+use rsvp::error::OrpError;
+use rsvp::input::extract_path;
+use rsvp::normalize::normalize;
+use rsvp::playback::{DEFAULT_WPM, Playback, validate_wpm};
+use rsvp::rsvp::OrpMode;
+use rsvp::tokenize::tokenize;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -29,7 +29,7 @@ fn main() {
     }
 }
 
-fn run() -> orp_reader::Result<()> {
+fn run() -> rsvp::Result<()> {
     let cli = Cli::parse();
     validate_wpm(cli.wpm)?;
 
@@ -41,5 +41,5 @@ fn run() -> orp_reader::Result<()> {
     }
 
     let playback = Playback::new(tokens, cli.wpm, OrpMode::Spritz)?;
-    orp_reader::tui::run(playback)
+    rsvp::tui::run(playback)
 }

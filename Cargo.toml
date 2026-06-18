@@ -1,14 +1,14 @@
 [package]
-name = "orp-reader"
+name = "rsvp"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "orp_reader"
+name = "rsvp"
 path = "src/lib.rs"
 
 [[bin]]
-name = "orp-reader"
+name = "rsvp"
 path = "src/main.rs"
 
 [dependencies]
