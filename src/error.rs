@@ -26,6 +26,13 @@ pub enum OrpError {
         source: pdf_extract::OutputError,
     },
 
+    #[error("failed to extract text from EPUB {path}")]
+    EpubExtract {
+        path: PathBuf,
+        #[source]
+        source: epub_parser::epub::Error,
+    },
+
     #[error("no readable text found in {path}")]
     NoReadableText { path: PathBuf },
 

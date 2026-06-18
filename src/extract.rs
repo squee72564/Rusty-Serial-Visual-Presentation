@@ -9,6 +9,7 @@ pub enum SourceFormat {
     Text,
     Markdown,
     Pdf,
+    Epub,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,34 @@ impl Extractor for PdfExtractor {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct EpubExtractor;
+
+impl Extractor for EpubExtractor {
+    fn extract(&self, path: &Path) -> Result<ExtractedDocument> {
+        let epub = epub_parser::Epub::parse(path).map_err(|source| OrpError::EpubExtract {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let text = epub
+            .pages
+            .iter()
+            .map(|page| page.content.trim())
+            .filter(|content| !content.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        Ok(ExtractedDocument {
+            source_path: path.to_path_buf(),
+            format: SourceFormat::Epub,
+            text,
+            warnings: vec![
+                "EPUB extraction is best-effort and ignores images, styling, and navigation".into(),
+            ],
+        })
+    }
+}
+
 fn markdown_to_text(markdown: &str) -> String {
     let parser = Parser::new_ext(markdown, Options::all());
     let mut text = String::new();
@@ -132,6 +161,7 @@ fn push_break(text: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Cursor, Write};
 
     #[test]
     fn markdown_extraction_skips_code_blocks_and_markup() {
@@ -155,6 +185,27 @@ mod tests {
         let document = PdfExtractor.extract(&path).unwrap();
 
         assert!(document.text.contains("Hello PDF text"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn epub_extraction_reads_spine_order_text() {
+        let path =
+            std::env::temp_dir().join(format!("orp-reader-fixture-{}.epub", std::process::id()));
+        std::fs::write(&path, tiny_epub()).unwrap();
+
+        let document = EpubExtractor.extract(&path).unwrap();
+
+        assert_eq!(document.format, SourceFormat::Epub);
+        assert!(document.text.contains("First chapter text."));
+        assert!(document.text.contains("Second chapter text."));
+        assert!(
+            document.text.find("First chapter text.").unwrap()
+                < document.text.find("Second chapter text.").unwrap()
+        );
+        assert!(!document.text.contains("console.log"));
+        assert!(!document.text.contains("display:none"));
 
         let _ = std::fs::remove_file(path);
     }
@@ -192,5 +243,83 @@ mod tests {
         ));
 
         pdf.into_bytes()
+    }
+
+    fn tiny_epub() -> Vec<u8> {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut archive = zip::ZipWriter::new(&mut cursor);
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+
+            write_zip_file(&mut archive, "mimetype", "application/epub+zip", options);
+            write_zip_file(
+                &mut archive,
+                "META-INF/container.xml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+                options,
+            );
+            write_zip_file(
+                &mut archive,
+                "OEBPS/content.opf",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Tiny EPUB</dc:title>
+    <dc:creator>Test Author</dc:creator>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="chapter-1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter-2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter-1"/>
+    <itemref idref="chapter-2"/>
+  </spine>
+</package>"#,
+                options,
+            );
+            write_zip_file(
+                &mut archive,
+                "OEBPS/chapter1.xhtml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><style>display:none</style></head>
+  <body>
+    <script>console.log('skip me')</script>
+    <p>First chapter text.</p>
+  </body>
+</html>"#,
+                options,
+            );
+            write_zip_file(
+                &mut archive,
+                "OEBPS/chapter2.xhtml",
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <body><p>Second chapter text.</p></body>
+</html>"#,
+                options,
+            );
+            archive.finish().unwrap();
+        }
+
+        cursor.into_inner()
+    }
+
+    fn write_zip_file<W: Write + std::io::Seek>(
+        archive: &mut zip::ZipWriter<W>,
+        name: &str,
+        content: &str,
+        options: zip::write::SimpleFileOptions,
+    ) {
+        archive.start_file(name, options).unwrap();
+        archive.write_all(content.as_bytes()).unwrap();
     }
 }

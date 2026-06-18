@@ -2,11 +2,11 @@
 
 ## Summary
 
-ORP Reader is a terminal-first RSVP reader for prose documents. The MVP turns `.txt`, `.md`, and best-effort `.pdf` files into a clean stream of words, then displays those words one at a time with a highlighted Optimal Recognition Point (ORP).
+ORP Reader is a terminal-first RSVP reader for prose documents. The MVP turns `.txt`, `.md`, best-effort `.pdf`, and best-effort `.epub` files into a clean stream of words, then displays those words one at a time with a highlighted Optimal Recognition Point (ORP).
 
 The project is library-first: document ingestion, text cleanup, tokenization, RSVP word modeling, timing, and playback state live in reusable core modules. The terminal UI is the first frontend and should remain a thin layer over that core.
 
-MVP non-goals: clipboard input, epub/docx/URL ingestion, OCR, saved progress, async loading, GUI/web frontends, and aggressive PDF header/footer cleanup.
+MVP non-goals: clipboard input, docx/URL ingestion, OCR, saved progress, async loading, GUI/web frontends, and aggressive PDF/EPUB cleanup.
 
 ## Architecture
 
@@ -49,6 +49,7 @@ Extraction:
 - `.md` files are parsed into readable prose with Markdown syntax removed.
 - Fenced and indented Markdown code blocks are skipped.
 - `.pdf` files use best-effort text extraction.
+- `.epub` files use best-effort text extraction from the EPUB spine and ignore images, styling, and navigation.
 - Scanned PDFs and PDFs that extract to no readable tokens are unsupported in MVP.
 
 Normalization:

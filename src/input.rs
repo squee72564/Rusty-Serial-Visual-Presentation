@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use crate::error::{OrpError, Result};
-use crate::extract::{ExtractedDocument, Extractor, MarkdownExtractor, PdfExtractor, TxtExtractor};
+use crate::extract::{
+    EpubExtractor, ExtractedDocument, Extractor, MarkdownExtractor, PdfExtractor, TxtExtractor,
+};
 
 pub fn extract_path(path: &Path) -> Result<ExtractedDocument> {
     match path
@@ -13,6 +15,7 @@ pub fn extract_path(path: &Path) -> Result<ExtractedDocument> {
         Some("txt") => TxtExtractor.extract(path),
         Some("md") | Some("markdown") => MarkdownExtractor.extract(path),
         Some("pdf") => PdfExtractor.extract(path),
+        Some("epub") => EpubExtractor.extract(path),
         _ => Err(OrpError::UnsupportedExtension {
             path: path.to_path_buf(),
         }),

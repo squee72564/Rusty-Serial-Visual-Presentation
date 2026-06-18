@@ -14,7 +14,7 @@ use rsvp::tokenize::tokenize;
     about = "Terminal RSVP reader with Optimal Recognition Point highlighting"
 )]
 struct Cli {
-    /// File to read. MVP supports .txt, .md, and best-effort .pdf.
+    /// File to read. Supports .txt, .md, best-effort .pdf, and best-effort .epub.
     path: PathBuf,
 
     /// Words per minute.
