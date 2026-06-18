@@ -22,7 +22,7 @@ pub struct Playback {
 impl Playback {
     pub fn new(tokens: Vec<Token>, wpm: u16, orp_mode: OrpMode) -> Result<Self> {
         validate_wpm(wpm)?;
-        let words = crate::rsvp::build_words(&tokens, orp_mode, wpm);
+        let words = crate::rsvp::build_words(&tokens, orp_mode);
         Ok(Self {
             tokens,
             words,
@@ -35,6 +35,13 @@ impl Playback {
 
     pub fn current(&self) -> Option<&RsvpWord> {
         self.words.get(self.index)
+    }
+
+    pub fn current_duration(&self) -> Duration {
+        self.tokens
+            .get(self.index)
+            .map(|token| duration_for_token(token, self.tokens.get(self.index + 1), self.wpm))
+            .unwrap_or(Duration::from_millis(200))
     }
 
     pub fn index(&self) -> usize {
@@ -102,16 +109,11 @@ impl Playback {
     }
 
     fn set_wpm(&mut self, wpm: u16) {
-        let current_duration = self.current().map(|word| word.duration);
         self.wpm = wpm.clamp(MIN_WPM, MAX_WPM);
-        self.rebuild_words();
-        if let (Some(word), Some(duration)) = (self.words.get_mut(self.index), current_duration) {
-            word.duration = duration;
-        }
     }
 
     fn rebuild_words(&mut self) {
-        self.words = crate::rsvp::build_words(&self.tokens, self.orp_mode, self.wpm);
+        self.words = crate::rsvp::build_words(&self.tokens, self.orp_mode);
     }
 }
 
@@ -244,16 +246,15 @@ mod tests {
     }
 
     #[test]
-    fn wpm_changes_apply_after_current_token() {
+    fn wpm_changes_apply_immediately() {
         let mut playback = Playback::new(tokens(), DEFAULT_WPM, OrpMode::Spritz).unwrap();
-        let original_duration = playback.current().unwrap().duration;
+
+        assert_eq!(playback.current_duration(), duration_for_wpm(DEFAULT_WPM));
 
         playback.increase_wpm();
 
-        assert_eq!(playback.current().unwrap().duration, original_duration);
-        playback.next();
         assert_eq!(
-            playback.current().unwrap().duration,
+            playback.current_duration(),
             duration_for_wpm(DEFAULT_WPM + WPM_STEP)
         );
     }

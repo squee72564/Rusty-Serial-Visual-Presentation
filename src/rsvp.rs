@@ -1,10 +1,7 @@
 use std::fmt;
-use std::time::Duration;
-
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::playback::duration_for_token;
 use crate::tokenize::Token;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,23 +68,13 @@ impl OrpStrategy for CenterOrp {
 pub struct RsvpWord {
     pub text: String,
     pub pivot_index: usize,
-    pub duration: Duration,
     pub prefix_width: usize,
     pub pivot_width: usize,
     pub suffix_width: usize,
 }
 
 impl RsvpWord {
-    pub fn from_token(token: &Token, mode: OrpMode, wpm: u16) -> Self {
-        Self::from_token_with_next(token, None, mode, wpm)
-    }
-
-    pub fn from_token_with_next(
-        token: &Token,
-        next_token: Option<&Token>,
-        mode: OrpMode,
-        wpm: u16,
-    ) -> Self {
+    pub fn from_token(token: &Token, mode: OrpMode) -> Self {
         let graphemes = token.text.graphemes(true).collect::<Vec<_>>();
         let strategy = mode.strategy();
         let pivot_index = strategy.pivot_index(&graphemes);
@@ -104,7 +91,6 @@ impl RsvpWord {
         Self {
             text: token.text.clone(),
             pivot_index,
-            duration: duration_for_token(token, next_token, wpm),
             prefix_width,
             pivot_width,
             suffix_width,
@@ -131,13 +117,10 @@ impl RsvpWord {
     }
 }
 
-pub fn build_words(tokens: &[Token], mode: OrpMode, wpm: u16) -> Vec<RsvpWord> {
+pub fn build_words(tokens: &[Token], mode: OrpMode) -> Vec<RsvpWord> {
     tokens
         .iter()
-        .enumerate()
-        .map(|(index, token)| {
-            RsvpWord::from_token_with_next(token, tokens.get(index + 1), mode, wpm)
-        })
+        .map(|token| RsvpWord::from_token(token, mode))
         .collect()
 }
 
@@ -159,7 +142,7 @@ mod tests {
             text: "cafe\u{301}".into(),
             paragraph_index: 0,
         };
-        let word = RsvpWord::from_token(&token, OrpMode::Center, 300);
+        let word = RsvpWord::from_token(&token, OrpMode::Center);
 
         let (_, pivot, _) = word.pivot_parts();
         assert!(!pivot.is_empty());

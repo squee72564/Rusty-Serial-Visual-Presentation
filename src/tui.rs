@@ -1,5 +1,5 @@
 use std::io::{self, Stdout};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
@@ -59,9 +59,7 @@ impl ReaderApp {
 
             let timeout = self
                 .playback
-                .current()
-                .map(|word| word.duration)
-                .unwrap_or(Duration::from_millis(200))
+                .current_duration()
                 .saturating_sub(self.last_tick.elapsed());
 
             if event::poll(timeout)? {
@@ -83,8 +81,14 @@ impl ReaderApp {
                             self.playback.next();
                             self.last_tick = Instant::now();
                         }
-                        KeyCode::Up => self.playback.increase_wpm(),
-                        KeyCode::Down => self.playback.decrease_wpm(),
+                        KeyCode::Up => {
+                            self.playback.increase_wpm();
+                            self.last_tick = Instant::now();
+                        }
+                        KeyCode::Down => {
+                            self.playback.decrease_wpm();
+                            self.last_tick = Instant::now();
+                        }
                         KeyCode::Char('o') => self.playback.cycle_orp_mode(),
                         KeyCode::Char('r') => {
                             self.playback.restart();
@@ -95,13 +99,7 @@ impl ReaderApp {
                 }
             }
 
-            if self.last_tick.elapsed()
-                >= self
-                    .playback
-                    .current()
-                    .map(|word| word.duration)
-                    .unwrap_or(Duration::from_millis(200))
-            {
+            if self.last_tick.elapsed() >= self.playback.current_duration() {
                 self.playback.tick();
                 self.last_tick = Instant::now();
             }
