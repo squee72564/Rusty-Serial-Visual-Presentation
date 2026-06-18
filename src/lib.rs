@@ -5,5 +5,6 @@ pub mod normalize;
 pub mod playback;
 pub mod rsvp;
 pub mod tokenize;
+pub mod tui;
 
 pub use error::{OrpError, Result};
