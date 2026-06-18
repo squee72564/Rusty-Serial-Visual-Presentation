@@ -1,0 +1,22 @@
+[package]
+name = "orp-reader"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "orp_reader"
+path = "src/lib.rs"
+
+[[bin]]
+name = "orp-reader"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.28"
+pdf-extract = "0.8"
+pulldown-cmark = "0.12"
+ratatui = "0.29"
+thiserror = "2.0"
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
