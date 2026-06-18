@@ -15,7 +15,7 @@ path = "src/main.rs"
 clap = { version = "4.5", features = ["derive"] }
 crossterm = "0.28"
 epub-parser = "0.3.4"
-pdf-extract = "0.8"
+pdf-extract = "0.10"
 pulldown-cmark = "0.12"
 ratatui = "0.29"
 thiserror = "2.0"
