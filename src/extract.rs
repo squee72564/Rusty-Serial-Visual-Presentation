@@ -1,120 +1,43 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 use crate::error::{OrpError, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceFormat {
-    Text,
-    Markdown,
-    Pdf,
-    Epub,
+pub fn extract_txt(path: &Path) -> Result<String> {
+    let bytes = std::fs::read(path).map_err(|source| OrpError::ReadFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    String::from_utf8(bytes).map_err(|source| OrpError::InvalidUtf8 {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
-#[derive(Debug, Clone)]
-pub struct ExtractedDocument {
-    pub source_path: PathBuf,
-    pub format: SourceFormat,
-    pub text: String,
-    pub warnings: Vec<String>,
+pub fn extract_markdown(path: &Path) -> Result<String> {
+    Ok(markdown_to_text(&extract_txt(path)?))
 }
 
-pub trait Extractor {
-    fn extract(&self, path: &Path) -> Result<ExtractedDocument>;
+pub fn extract_pdf(path: &Path) -> Result<String> {
+    pdf_extract::extract_text(path).map_err(|source| OrpError::PdfExtract {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
-#[derive(Debug, Default)]
-pub struct TxtExtractor;
-
-impl Extractor for TxtExtractor {
-    fn extract(&self, path: &Path) -> Result<ExtractedDocument> {
-        let bytes = std::fs::read(path).map_err(|source| OrpError::ReadFile {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let text = String::from_utf8(bytes).map_err(|source| OrpError::InvalidUtf8 {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        Ok(ExtractedDocument {
-            source_path: path.to_path_buf(),
-            format: SourceFormat::Text,
-            text,
-            warnings: Vec::new(),
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct MarkdownExtractor;
-
-impl Extractor for MarkdownExtractor {
-    fn extract(&self, path: &Path) -> Result<ExtractedDocument> {
-        let bytes = std::fs::read(path).map_err(|source| OrpError::ReadFile {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let markdown = String::from_utf8(bytes).map_err(|source| OrpError::InvalidUtf8 {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        Ok(ExtractedDocument {
-            source_path: path.to_path_buf(),
-            format: SourceFormat::Markdown,
-            text: markdown_to_text(&markdown),
-            warnings: Vec::new(),
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct PdfExtractor;
-
-impl Extractor for PdfExtractor {
-    fn extract(&self, path: &Path) -> Result<ExtractedDocument> {
-        let text = pdf_extract::extract_text(path).map_err(|source| OrpError::PdfExtract {
-            path: path.to_path_buf(),
-            source,
-        })?;
-
-        Ok(ExtractedDocument {
-            source_path: path.to_path_buf(),
-            format: SourceFormat::Pdf,
-            text,
-            warnings: vec!["PDF extraction is best-effort and may include layout artifacts".into()],
-        })
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct EpubExtractor;
-
-impl Extractor for EpubExtractor {
-    fn extract(&self, path: &Path) -> Result<ExtractedDocument> {
-        let epub = epub_parser::Epub::parse(path).map_err(|source| OrpError::EpubExtract {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let text = epub
-            .pages
-            .iter()
-            .map(|page| page.content.trim())
-            .filter(|content| !content.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        Ok(ExtractedDocument {
-            source_path: path.to_path_buf(),
-            format: SourceFormat::Epub,
-            text,
-            warnings: vec![
-                "EPUB extraction is best-effort and ignores images, styling, and navigation".into(),
-            ],
-        })
-    }
+pub fn extract_epub(path: &Path) -> Result<String> {
+    let epub = epub_parser::Epub::parse(path).map_err(|source| OrpError::EpubExtract {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(epub
+        .pages
+        .iter()
+        .map(|page| page.content.trim())
+        .filter(|content| !content.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n"))
 }
 
 fn markdown_to_text(markdown: &str) -> String {
@@ -182,9 +105,9 @@ mod tests {
             std::env::temp_dir().join(format!("orp-reader-fixture-{}.pdf", std::process::id()));
         std::fs::write(&path, tiny_pdf()).unwrap();
 
-        let document = PdfExtractor.extract(&path).unwrap();
+        let text = extract_pdf(&path).unwrap();
 
-        assert!(document.text.contains("Hello PDF text"));
+        assert!(text.contains("Hello PDF text"));
 
         let _ = std::fs::remove_file(path);
     }
@@ -195,17 +118,15 @@ mod tests {
             std::env::temp_dir().join(format!("orp-reader-fixture-{}.epub", std::process::id()));
         std::fs::write(&path, tiny_epub()).unwrap();
 
-        let document = EpubExtractor.extract(&path).unwrap();
+        let text = extract_epub(&path).unwrap();
 
-        assert_eq!(document.format, SourceFormat::Epub);
-        assert!(document.text.contains("First chapter text."));
-        assert!(document.text.contains("Second chapter text."));
+        assert!(text.contains("First chapter text."));
+        assert!(text.contains("Second chapter text."));
         assert!(
-            document.text.find("First chapter text.").unwrap()
-                < document.text.find("Second chapter text.").unwrap()
+            text.find("First chapter text.").unwrap() < text.find("Second chapter text.").unwrap()
         );
-        assert!(!document.text.contains("console.log"));
-        assert!(!document.text.contains("display:none"));
+        assert!(!text.contains("console.log"));
+        assert!(!text.contains("display:none"));
 
         let _ = std::fs::remove_file(path);
     }

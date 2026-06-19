@@ -19,7 +19,7 @@ The crate uses conventional Rust naming:
 Main modules:
 
 - `input`: source detection and file loading entry points.
-- `extract`: format-specific extraction behind an `Extractor` trait.
+- `extract`: format-specific text extraction functions.
 - `normalize`: whitespace and line-break cleanup.
 - `tokenize`: conversion from normalized text into display tokens.
 - `rsvp`: ORP strategies and RSVP display word construction.

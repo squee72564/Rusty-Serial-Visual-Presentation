@@ -1,18 +1,6 @@
-use crate::extract::ExtractedDocument;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Boundary {
-    pub byte_index: usize,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedDocument {
     pub text: String,
-    pub paragraph_boundaries: Vec<Boundary>,
-}
-
-pub fn normalize(document: &ExtractedDocument) -> NormalizedDocument {
-    normalize_text(&document.text)
 }
 
 pub fn normalize_text(input: &str) -> NormalizedDocument {
@@ -24,22 +12,14 @@ pub fn normalize_text(input: &str) -> NormalizedDocument {
         .collect::<Vec<_>>();
 
     let mut text = String::new();
-    let mut paragraph_boundaries = Vec::new();
-
     for paragraph in paragraphs {
         if !text.is_empty() {
-            paragraph_boundaries.push(Boundary {
-                byte_index: text.len(),
-            });
             text.push_str("\n\n");
         }
         text.push_str(&paragraph);
     }
 
-    NormalizedDocument {
-        text,
-        paragraph_boundaries,
-    }
+    NormalizedDocument { text }
 }
 
 fn join_hyphenated_line_breaks(input: &str) -> String {
@@ -90,6 +70,5 @@ mod tests {
         let normalized = normalize_text("A hyphen-\nated   word.\n\nNext\t paragraph.");
 
         assert_eq!(normalized.text, "A hyphenated word.\n\nNext paragraph.");
-        assert_eq!(normalized.paragraph_boundaries.len(), 1);
     }
 }

@@ -33,7 +33,6 @@ mod tests {
     fn keeps_punctuation_attached() {
         let document = NormalizedDocument {
             text: "Hello, don't stop. Well-known U.S. 3.14".into(),
-            paragraph_boundaries: Vec::new(),
         };
 
         let words = tokenize(&document)

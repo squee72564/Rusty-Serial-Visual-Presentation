@@ -6,7 +6,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::error::{OrpError, Result};
-use crate::extract::ExtractedDocument;
 use crate::normalize::normalize_text;
 use crate::tokenize::{Token, tokenize};
 
@@ -50,10 +49,6 @@ impl StreamHandle {
 
     pub fn timings(&self) -> Option<Arc<Mutex<StreamTimings>>> {
         self.timings_enabled.then(|| Arc::clone(&self.timings))
-    }
-
-    pub fn raw_timings(&self) -> Arc<Mutex<StreamTimings>> {
-        Arc::clone(&self.timings)
     }
 }
 
@@ -245,12 +240,11 @@ fn stream_whole_document(
 ) -> Result<()> {
     set_source_format(&timings, source_format);
     let load_started = Instant::now();
-    let document = crate::input::extract_path(path)?;
+    let text = crate::input::extract_path(path)?;
     timings
         .lock()
         .expect("stream timing lock poisoned")
         .document_load += load_started.elapsed();
-    let ExtractedDocument { text, .. } = document;
     let mut builder = ChunkBuilder::new();
     let nt_started = Instant::now();
     let tokens = normalize_and_tokenize(&text, &mut builder.next_paragraph_index);
