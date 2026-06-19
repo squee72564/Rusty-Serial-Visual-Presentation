@@ -39,6 +39,9 @@ pub enum OrpError {
     #[error("WPM must be between {min} and {max}; got {actual}")]
     InvalidWpm { actual: u16, min: u16, max: u16 },
 
+    #[error("stream worker disconnected unexpectedly")]
+    StreamDisconnected,
+
     #[error("terminal error")]
     Terminal(#[from] std::io::Error),
 }

@@ -11,7 +11,6 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use unicode_width::UnicodeWidthStr;
 
 use crate::error::Result;
 use crate::playback::Playback;
@@ -55,6 +54,7 @@ impl ReaderApp {
 
     fn run(&mut self, terminal: &mut TuiTerminal) -> Result<()> {
         loop {
+            self.playback.poll_stream();
             terminal.draw(|frame| self.render(frame))?;
 
             let timeout = self
@@ -123,10 +123,16 @@ impl ReaderApp {
             .block(Block::default().borders(Borders::NONE));
         frame.render_widget(reader, reader_area);
 
-        let progress = if self.playback.is_empty() {
-            "0/0".to_string()
+        let progress = if let Some(error) = self.playback.stream_error() {
+            format!("error: {error}")
+        } else if self.playback.is_empty() {
+            "word 0".to_string()
+        } else if self.playback.is_at_end() {
+            format!("word {} | end", self.playback.index() + 1)
+        } else if self.playback.is_loading() {
+            format!("word {} | loading", self.playback.index() + 1)
         } else {
-            format!("{}/{}", self.playback.index() + 1, self.playback.len())
+            format!("word {}", self.playback.index() + 1)
         };
         let state = if self.playback.is_playing() {
             "playing"
@@ -151,8 +157,9 @@ impl ReaderApp {
         let Some(word) = self.playback.current() else {
             return Line::from("No readable text");
         };
+        let prefix_width = word.prefix_width;
         let (prefix, pivot, suffix) = word.pivot_parts();
-        let padding = anchor_padding(viewport_width, prefix.width());
+        let padding = anchor_padding(viewport_width, prefix_width);
         let mut spans = Vec::new();
 
         spans.push(Span::raw(" ".repeat(padding)));

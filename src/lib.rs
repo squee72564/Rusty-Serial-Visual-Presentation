@@ -4,6 +4,7 @@ pub mod input;
 pub mod normalize;
 pub mod playback;
 pub mod rsvp;
+pub mod stream;
 pub mod tokenize;
 pub mod tui;
 

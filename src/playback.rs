@@ -1,7 +1,9 @@
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
 use crate::error::{OrpError, Result};
 use crate::rsvp::{OrpMode, RsvpWord};
+use crate::stream::{StreamChunk, StreamEvent, StreamHandle, spawn_stream};
 use crate::tokenize::Token;
 
 pub const DEFAULT_WPM: u16 = 300;
@@ -9,55 +11,85 @@ pub const MIN_WPM: u16 = 100;
 pub const MAX_WPM: u16 = 1000;
 pub const WPM_STEP: u16 = 25;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Playback {
-    tokens: Vec<Token>,
-    words: Vec<RsvpWord>,
-    index: usize,
+    prev: Option<StreamChunk>,
+    current: StreamChunk,
+    next: Option<StreamChunk>,
+    receiver: Receiver<StreamEvent>,
+    local_index: usize,
     playing: bool,
     wpm: u16,
     orp_mode: OrpMode,
+    stream_done: bool,
+    loading: bool,
+    error: Option<String>,
+    path: std::path::PathBuf,
+    timings_enabled: bool,
 }
 
 impl Playback {
-    pub fn new(tokens: Vec<Token>, wpm: u16, orp_mode: OrpMode) -> Result<Self> {
+    pub fn from_stream(stream: StreamHandle, wpm: u16, orp_mode: OrpMode) -> Result<Self> {
         validate_wpm(wpm)?;
-        let words = crate::rsvp::build_words(&tokens, orp_mode);
-        Ok(Self {
-            tokens,
-            words,
-            index: 0,
+
+        let source_path = stream.path().to_path_buf();
+        let timings_enabled = stream.timings_enabled();
+        let receiver = stream.receiver();
+        let current = first_chunk(&receiver)?;
+        let stream_done = current.eof;
+
+        let mut playback = Self {
+            prev: None,
+            current,
+            next: None,
+            receiver,
+            local_index: 0,
             playing: false,
             wpm,
             orp_mode,
-        })
+            stream_done,
+            loading: false,
+            error: None,
+            path: source_path,
+            timings_enabled,
+        };
+        playback.fill_next_nonblocking();
+        Ok(playback)
     }
 
-    pub fn current(&self) -> Option<&RsvpWord> {
-        self.words.get(self.index)
+    pub fn current(&self) -> Option<RsvpWord> {
+        self.current_token()
+            .map(|token| RsvpWord::from_token(token, self.orp_mode))
     }
 
     pub fn current_duration(&self) -> Duration {
-        self.tokens
-            .get(self.index)
-            .map(|token| duration_for_token(token, self.tokens.get(self.index + 1), self.wpm))
+        self.current_token()
+            .map(|token| duration_for_token(token, self.next_token(), self.wpm))
             .unwrap_or(Duration::from_millis(200))
     }
 
     pub fn index(&self) -> usize {
-        self.index
-    }
-
-    pub fn len(&self) -> usize {
-        self.words.len()
+        self.current.start_word_index + self.local_index
     }
 
     pub fn is_empty(&self) -> bool {
-        self.words.is_empty()
+        self.current.tokens.is_empty()
     }
 
     pub fn is_playing(&self) -> bool {
         self.playing
+    }
+
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    pub fn stream_error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub fn is_at_end(&self) -> bool {
+        self.stream_done && self.next.is_none() && self.local_index + 1 >= self.current.tokens.len()
     }
 
     pub fn wpm(&self) -> u16 {
@@ -68,25 +100,97 @@ impl Playback {
         self.orp_mode
     }
 
+    pub fn poll_stream(&mut self) {
+        if self.next.is_none() {
+            self.fill_next_nonblocking();
+        }
+    }
+
     pub fn toggle_playing(&mut self) {
-        self.playing = !self.playing;
-    }
-
-    pub fn restart(&mut self) {
-        self.index = 0;
-        self.playing = true;
-    }
-
-    pub fn previous(&mut self) {
-        self.index = self.index.saturating_sub(1);
-    }
-
-    pub fn next(&mut self) {
-        if self.index + 1 >= self.words.len() {
+        if self.error.is_some() || self.is_at_end() {
             self.playing = false;
             return;
         }
-        self.index += 1;
+        self.playing = !self.playing;
+        if self.playing {
+            self.loading = false;
+        }
+    }
+
+    pub fn restart(&mut self) {
+        let stream = spawn_stream(self.path.clone(), self.timings_enabled);
+        self.receiver = stream.receiver();
+        self.prev = None;
+        self.next = None;
+        self.local_index = 0;
+        self.playing = false;
+        self.stream_done = false;
+        self.loading = true;
+        self.error = None;
+
+        match first_chunk(&self.receiver) {
+            Ok(chunk) => {
+                self.current = chunk;
+                self.loading = false;
+                self.playing = true;
+                self.fill_next_nonblocking();
+            }
+            Err(error) => {
+                self.error = Some(error.to_string());
+                self.playing = false;
+            }
+        }
+    }
+
+    pub fn previous(&mut self) {
+        self.loading = false;
+        if self.local_index > 0 {
+            self.local_index -= 1;
+            return;
+        }
+
+        if let Some(prev) = self.prev.take() {
+            let old_current = std::mem::replace(&mut self.current, prev);
+            self.next = Some(old_current);
+            self.local_index = self.current.tokens.len().saturating_sub(1);
+        }
+    }
+
+    pub fn next(&mut self) {
+        if self.error.is_some() {
+            self.playing = false;
+            return;
+        }
+
+        if self.local_index + 1 < self.current.tokens.len() {
+            self.local_index += 1;
+            self.loading = false;
+            return;
+        }
+
+        if let Some(next) = self.next.take() {
+            let old_current = std::mem::replace(&mut self.current, next);
+            self.prev = Some(old_current);
+            self.local_index = 0;
+            self.loading = false;
+            self.fill_next_nonblocking();
+            return;
+        }
+
+        self.fill_next_nonblocking();
+        if let Some(next) = self.next.take() {
+            let old_current = std::mem::replace(&mut self.current, next);
+            self.prev = Some(old_current);
+            self.local_index = 0;
+            self.loading = false;
+            self.fill_next_nonblocking();
+        } else if self.current.eof || self.stream_done {
+            self.playing = false;
+            self.loading = false;
+        } else {
+            self.playing = false;
+            self.loading = true;
+        }
     }
 
     pub fn tick(&mut self) {
@@ -105,15 +209,62 @@ impl Playback {
 
     pub fn cycle_orp_mode(&mut self) {
         self.orp_mode = self.orp_mode.next();
-        self.rebuild_words();
     }
 
     fn set_wpm(&mut self, wpm: u16) {
         self.wpm = wpm.clamp(MIN_WPM, MAX_WPM);
     }
 
-    fn rebuild_words(&mut self) {
-        self.words = crate::rsvp::build_words(&self.tokens, self.orp_mode);
+    fn current_token(&self) -> Option<&Token> {
+        self.current.tokens.get(self.local_index)
+    }
+
+    fn next_token(&self) -> Option<&Token> {
+        self.current
+            .tokens
+            .get(self.local_index + 1)
+            .or_else(|| self.next.as_ref().and_then(|chunk| chunk.tokens.first()))
+    }
+
+    fn fill_next_nonblocking(&mut self) {
+        if self.next.is_some() || self.stream_done || self.error.is_some() {
+            return;
+        }
+
+        loop {
+            match self.receiver.try_recv() {
+                Ok(StreamEvent::Chunk(chunk)) => {
+                    self.loading = false;
+                    if chunk.eof {
+                        self.stream_done = true;
+                    }
+                    self.next = Some(chunk);
+                    return;
+                }
+                Ok(StreamEvent::Failed(error)) => {
+                    self.error = Some(error.to_string());
+                    self.playing = false;
+                    self.loading = false;
+                    return;
+                }
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    self.error = Some(OrpError::StreamDisconnected.to_string());
+                    self.playing = false;
+                    self.loading = false;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn first_chunk(receiver: &Receiver<StreamEvent>) -> Result<StreamChunk> {
+    loop {
+        match receiver.recv().map_err(|_| OrpError::StreamDisconnected)? {
+            StreamEvent::Chunk(chunk) => return Ok(chunk),
+            StreamEvent::Failed(error) => return Err(error),
+        }
     }
 }
 
@@ -161,6 +312,7 @@ fn trailing_reading_punctuation(text: &str) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::sync_channel;
 
     fn tokens() -> Vec<Token> {
         ["one", "two", "three"]
@@ -170,6 +322,47 @@ mod tests {
                 paragraph_index: 0,
             })
             .collect()
+    }
+
+    fn token(text: &str, paragraph_index: usize) -> Token {
+        Token {
+            text: text.into(),
+            paragraph_index,
+        }
+    }
+
+    fn chunk(id: usize, start_word_index: usize, tokens: Vec<Token>, eof: bool) -> StreamChunk {
+        StreamChunk {
+            id,
+            start_word_index,
+            tokens,
+            eof,
+        }
+    }
+
+    fn streaming_playback(current: StreamChunk, receiver: Receiver<StreamEvent>) -> Playback {
+        Playback {
+            prev: None,
+            current,
+            next: None,
+            receiver,
+            local_index: 0,
+            playing: false,
+            wpm: DEFAULT_WPM,
+            orp_mode: OrpMode::Spritz,
+            stream_done: false,
+            loading: false,
+            error: None,
+            path: std::path::PathBuf::from("<test>"),
+            timings_enabled: false,
+        }
+    }
+
+    fn closed_playback(tokens: Vec<Token>) -> Playback {
+        let (_sender, receiver) = sync_channel(2);
+        let mut playback = streaming_playback(chunk(0, 0, tokens, true), receiver);
+        playback.stream_done = true;
+        playback
     }
 
     #[test]
@@ -225,7 +418,7 @@ mod tests {
 
     #[test]
     fn playback_state_handles_controls_and_bounds() {
-        let mut playback = Playback::new(tokens(), DEFAULT_WPM, OrpMode::Spritz).unwrap();
+        let mut playback = closed_playback(tokens());
 
         assert!(!playback.is_playing());
         playback.toggle_playing();
@@ -241,13 +434,11 @@ mod tests {
         assert_eq!(playback.wpm(), MAX_WPM);
         playback.cycle_orp_mode();
         assert_eq!(playback.orp_mode(), OrpMode::Center);
-        playback.restart();
-        assert_eq!(playback.index(), 0);
     }
 
     #[test]
     fn wpm_changes_apply_immediately() {
-        let mut playback = Playback::new(tokens(), DEFAULT_WPM, OrpMode::Spritz).unwrap();
+        let mut playback = closed_playback(tokens());
 
         assert_eq!(playback.current_duration(), duration_for_wpm(DEFAULT_WPM));
 
@@ -261,7 +452,7 @@ mod tests {
 
     #[test]
     fn playback_pauses_at_end() {
-        let mut playback = Playback::new(tokens(), DEFAULT_WPM, OrpMode::Spritz).unwrap();
+        let mut playback = closed_playback(tokens());
 
         playback.toggle_playing();
         playback.tick();
@@ -270,5 +461,54 @@ mod tests {
 
         assert_eq!(playback.index(), 2);
         assert!(!playback.is_playing());
+    }
+
+    #[test]
+    fn streaming_playback_rotates_chunks_and_steps_back() {
+        let (sender, receiver) = sync_channel(2);
+        sender
+            .send(StreamEvent::Chunk(chunk(1, 1, vec![token("two", 0)], true)))
+            .unwrap();
+        let mut playback = streaming_playback(chunk(0, 0, vec![token("one", 0)], false), receiver);
+
+        playback.poll_stream();
+        playback.next();
+
+        assert_eq!(playback.index(), 1);
+
+        playback.previous();
+
+        assert_eq!(playback.index(), 0);
+    }
+
+    #[test]
+    fn streaming_playback_pauses_at_unloaded_boundary() {
+        let (_sender, receiver) = sync_channel(2);
+        let mut playback = streaming_playback(chunk(0, 0, vec![token("one", 0)], false), receiver);
+        playback.toggle_playing();
+
+        playback.next();
+
+        assert!(playback.is_loading());
+        assert!(!playback.is_playing());
+        assert_eq!(playback.index(), 0);
+    }
+
+    #[test]
+    fn timing_uses_loaded_next_chunk_for_paragraph_pause() {
+        let (sender, receiver) = sync_channel(2);
+        sender
+            .send(StreamEvent::Chunk(chunk(
+                1,
+                1,
+                vec![token("next", 1)],
+                true,
+            )))
+            .unwrap();
+        let mut playback = streaming_playback(chunk(0, 0, vec![token("end.", 0)], false), receiver);
+
+        playback.poll_stream();
+
+        assert_eq!(playback.current_duration(), Duration::from_millis(500));
     }
 }
